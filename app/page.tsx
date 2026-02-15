@@ -48,6 +48,12 @@ export default async function Home() {
 
   return (
     <div className="relative flex min-h-screen items-center justify-center bg-zinc-950 font-sans overflow-hidden">
+      {/* Celebrating 1st Year Badge */}
+      <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50">
+        <span className="px-4 py-2 rounded-full bg-zinc-100 text-zinc-900 border border-zinc-200 shadow-lg dark:bg-zinc-800 dark:text-zinc-100 dark:border-zinc-700 font-semibold text-sm flex items-center gap-2">
+          🎉 Celebrating 1st Year
+        </span>
+      </div>
       {/* Logo and GitHub Stars */}
       <div className="fixed top-6 left-6 z-50 flex items-center gap-4">
         <Image
