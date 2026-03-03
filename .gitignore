@@ -6,6 +6,9 @@ drizzle */migrations
 # YouTube API routes
 app/api/youtubes
 
+# Tera API routes
+app/api/tera
+
 # Email service and email list
 lib/email-service.ts
 emails.txt
