@@ -8,9 +8,109 @@ interface StreamResponse {
   detailUrl?: string;
   apiUrl?: string;
   movieImage?: string;
+  meta?: ReturnType<typeof parseNuxtData>;
+  languageData?: {
+    dubs: Array<Record<string, unknown>>;
+    subtitles?: string;
+    source?: string;
+  };
   playbackHeaders?: Record<string, string>;
   data?: unknown;
   error?: string;
+}
+
+const PLAY_COOKIE =
+  'mb_token=%22eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1aWQiOjEzMzI1MTYyOTA2MjM4NTEyMDgsImF0cCI6MywiZXh0IjoiMTc2OTU3NDU3NyIsImV4cCI6MTc3NzM1MDU3NywiaWF0IjoxNzY5NTc0Mjc3fQ.Gc4HmKDugVKcWSGoxtCqBTWdZix5dvRpp_22_Z7-7Vk%22; i18n_lang=en';
+
+function parseNuxtData(html: string) {
+  const match = html.match(/<script[^>]+id="__NUXT_DATA__"[^>]*>([\s\S]*?)<\/script>/);
+  if (!match) return null;
+
+  let raw: unknown[];
+  try {
+    raw = JSON.parse(match[1]) as unknown[];
+  } catch {
+    return null;
+  }
+
+  const payloadIdx = raw.findIndex(
+    (item) =>
+      item !== null &&
+      typeof item === 'object' &&
+      !Array.isArray(item) &&
+      'subject' in (item as object) &&
+      'resource' in (item as object) &&
+      'stars' in (item as object)
+  );
+  if (payloadIdx === -1) return null;
+
+  const cache = new Map<number, unknown>();
+  function resolve(idx: number): unknown {
+    if (!Number.isInteger(idx) || idx < 0 || idx >= raw.length) return undefined;
+    if (cache.has(idx)) return cache.get(idx);
+
+    const value = raw[idx];
+    if (value === null || value === undefined || typeof value !== 'object') {
+      cache.set(idx, value);
+      return value;
+    }
+
+    if (Array.isArray(value)) {
+      if (value[0] === 'ShallowReactive' || value[0] === 'Reactive') {
+        const resolved = resolve(value[1] as number);
+        cache.set(idx, resolved);
+        return resolved;
+      }
+      if (value[0] === 'Set') {
+        const resolved: unknown[] = value.slice(1).map((entry: unknown) =>
+          typeof entry === 'number' ? resolve(entry) : entry
+        );
+        cache.set(idx, resolved);
+        return resolved;
+      }
+
+      const resolved: unknown[] = [];
+      cache.set(idx, resolved);
+      value.forEach((entry: unknown) => resolved.push(typeof entry === 'number' ? resolve(entry) : entry));
+      return resolved;
+    }
+
+    const resolved: Record<string, unknown> = {};
+    cache.set(idx, resolved);
+    for (const [key, entry] of Object.entries(value)) {
+      resolved[key] = typeof entry === 'number' ? resolve(entry) : entry;
+    }
+    return resolved;
+  }
+
+  const payload = resolve(payloadIdx) as Record<string, unknown> | undefined;
+  if (!payload?.subject) return null;
+
+  const subject = payload.subject as Record<string, unknown>;
+  const resource = payload.resource as Record<string, unknown> | undefined;
+
+  return {
+    subjectId: subject.subjectId as string | undefined,
+    subjectType: subject.subjectType as number | undefined,
+    title: subject.title as string | undefined,
+    description: subject.description as string | undefined,
+    releaseDate: subject.releaseDate as string | undefined,
+    genre: subject.genre as string | undefined,
+    country: subject.countryName as string | undefined,
+    imdbRating: subject.imdbRatingValue as string | undefined,
+    imdbRatingCount: subject.imdbRatingCount as number | undefined,
+    subtitles: subject.subtitles as string | undefined,
+    dubs: Array.isArray(subject.dubs)
+      ? (subject.dubs as Record<string, unknown>[]).map((dub) => ({
+          name: dub.lanName,
+          code: dub.lanCode,
+          subjectId: dub.subjectId,
+          detailPath: dub.detailPath,
+        }))
+      : [],
+    detailPath: subject.detailPath as string | undefined,
+    source: resource?.source as string | undefined,
+  };
 }
 
 interface ParsedStreamInput {
@@ -224,18 +324,22 @@ export async function GET(request: NextRequest) {
 
     // Optionally fetch movie image from the detail page
     let movieImage = '';
+    let meta: ReturnType<typeof parseNuxtData> = null;
     try {
       const detailResponse = await fetch(detailUrl, {
         method: 'GET',
         headers: {
+          'Cookie': PLAY_COOKIE,
           'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': 'https://themoviebox.org/',
         }
       });
       
       if (detailResponse.ok) {
         const detailHtml = await detailResponse.text();
+        meta = parseNuxtData(detailHtml);
         const $ = cheerio.load(detailHtml);
         
         // Extract image from the movie detail page
@@ -254,6 +358,12 @@ export async function GET(request: NextRequest) {
       detailUrl,
       apiUrl: apiUrl.toString(),
       movieImage,
+      meta,
+      languageData: {
+        dubs: meta?.dubs ?? [],
+        subtitles: meta?.subtitles,
+        source: meta?.source,
+      },
       playbackHeaders,
       extractedParams: {
         urlSeason,
@@ -338,18 +448,22 @@ export async function POST(request: NextRequest) {
 
     // Optionally fetch movie image from the detail page
     let movieImage = '';
+    let meta: ReturnType<typeof parseNuxtData> = null;
     try {
       const detailResponse = await fetch(detailUrl, {
         method: 'GET',
         headers: {
+          'Cookie': PLAY_COOKIE,
           'User-Agent': 'Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36',
           'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
           'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': 'https://themoviebox.org/',
         }
       });
       
       if (detailResponse.ok) {
         const detailHtml = await detailResponse.text();
+        meta = parseNuxtData(detailHtml);
         const $ = cheerio.load(detailHtml);
         
         // Extract image from the movie detail page
@@ -368,6 +482,12 @@ export async function POST(request: NextRequest) {
       detailUrl,
       apiUrl: apiUrl.toString(),
       movieImage,
+      meta,
+      languageData: {
+        dubs: meta?.dubs ?? [],
+        subtitles: meta?.subtitles,
+        source: meta?.source,
+      },
       playbackHeaders,
       customParams: {
         season: customSeason,

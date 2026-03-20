@@ -9,6 +9,9 @@ app/api/youtubes
 # Tera API routes
 app/api/tera
 
+# TheMovie all route
+app/api/themovie/all
+
 # Eporner API routes
 app/api/adult/eporner
 
